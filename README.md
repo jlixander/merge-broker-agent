@@ -102,6 +102,17 @@ own `GUARD-DENIED`, `MERGE-FAILED`, `MERGE-UNCONFIRMED`.
   displaced) requires an explicit `BACK-TO-BACK` directive and every displaced run is
   enumerated in the reply — stated, never silent.
 
+## Prior art, and what this adds
+
+Serializing merges is an old, proven idea — this project stands on it rather than claiming it:
+
+- **[agent-merge-broker](https://github.com/WeSpitfire/agent-merge-broker)** (no relation, discovered after this shipped) shares the name and the thesis — a fail-closed integration authority for AI agent fleets — as a TypeScript CLI transaction coordinator: workers submit commit receipts, it batches them, cherry-picks into a worktree, runs local validators, and lands via GitHub auto-merge. Different artifact: no agent definition, batch-per-landing rather than one guarded merge per invocation, and none of the CI forensics below.
+- **[Gas Town](https://github.com/gastownhall/gastown)'s Refinery** gives an agent fleet a dedicated merge-queue role ("polecats never push directly to main") — the same topology this assumes — as a batching/bisecting queue inside its own ecosystem. **[Overstory](https://github.com/jayminwest/overstory)** (archived) had a constrained "Merger" subagent draining a FIFO queue of local branches.
+- **Classic merge queues** — [Bors](https://github.com/bors-ng/bors-ng)' "not rocket science rule", [GitHub's native merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue), Mergify, Aviator — have serialized human PRs for a decade. Notably, GitHub's own required checks treat a **skipped** check as passing, which is part of why this project exists.
+- **Point solutions** for individual traps: [alls-green](https://github.com/re-actors/alls-green) and [merge-gatekeeper](https://github.com/upsidr/merge-gatekeeper) (skipped/job-level checks — but they run *inside* the workflow graph, so a run that spawns zero jobs never triggers them), [policy-bot](https://github.com/palantir/policy-bot) (stale-approval invalidation), and `gh pr merge --match-head-commit` (first-party head pinning).
+
+What was missing, and what this adds: an **outside-in audit** of the CI evidence itself (a green run with zero spawned jobs is detected from the API, not from inside the run that never happened), **deploy-queue awareness** (refusing to merge when a shared concurrency group would silently cancel a pending deploy, or when an auto-deploy provider would ship a red main), and the **composition as a portable artifact** — one agent definition + one fail-closed checker, dry-run by default, exactly one merge per invocation, usable from any agent CLI or by a human.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
