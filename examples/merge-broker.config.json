@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "review_gate": {
+    "mode": "github-approval",
+    "command": "python scripts/my_evidence_gate.py --repo $MB_REPO --pr $MB_PR --head $MB_HEAD"
+  },
+  "required_workflows": [
+    { "path": ".github/workflows/ci.yml", "when": "always" },
+    { "path": ".github/workflows/tests.yml", "when": "paths" }
+  ],
+  "test_owed": {
+    "workflow_path": ".github/workflows/tests.yml",
+    "job_name_contains": "pytest",
+    "paths": ["src/**", "lib/**"]
+  },
+  "deploy": {
+    "model": "actions",
+    "workflow": "deploy.yml",
+    "status_command": "curl -sf https://my-provider.example/api/builds/latest | grep -q '\"idle\"'"
+  }
+}
