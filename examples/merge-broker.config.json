@@ -1,5 +1,6 @@
 {
   "default_branch": "main",
+  "verdict_paths": [".github/workflows/**", "src/**", "lib/**"],
   "review_gate": {
     "mode": "github-approval",
     "command": "python scripts/my_evidence_gate.py --repo $MB_REPO --pr $MB_PR --head $MB_HEAD"

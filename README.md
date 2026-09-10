@@ -27,6 +27,7 @@ a single stdlib-only Python script driven by the GitHub CLI.
 | **Merging IS deploying** | Auto-deploy providers (Amplify, Vercel, Netlify, Pages) build main regardless of CI color — merging onto a red main ships the redness | External-deploy model requires the main tip job-level green + provider idle |
 | **Stale review evidence** | An approval pinned to an older commit is evidence about different code | Approvals are checked against the exact head sha |
 | **Scanner false positives** | Policy hooks that regex shell commands can fire on a *mention* of a merge command inside a quote or heredoc | The agent confines the merge literal to one command and treats hook false positives as hook defects — never a reason to weaken a gate |
+| **Stale-green merge** | A green board proves the PR passed against the base it was *tested* on, not the base it's about to *merge into* — if `main` gains a workflow or source change in between, the green no longer describes reality | `scripts/check_pr_board_freshness.py` diffs the base branch since the board's CI concluded; verdict-changing files in that gap → `REJECTED-STALE-BOARD` |
 
 ## How it works
 
@@ -51,6 +52,7 @@ Coordinator ──► merge-broker agent ──► scripts/merge_broker_check.py
 
 ```bash
 cp scripts/merge_broker_check.py  YOUR_REPO/scripts/
+cp scripts/check_pr_board_freshness.py  YOUR_REPO/scripts/
 cp examples/merge-broker.config.json  YOUR_REPO/merge-broker.config.json   # then edit it
 ```
 
@@ -76,6 +78,7 @@ for the target repo (`gh auth status`). No other dependencies.
 | `required_workflows` | Workflows a PR **owes** a green run of: `"when": "always"`, or `"when": "paths"` to owe it only when the diff hits the workflow's own `on.pull_request.paths` (parsed at the head sha, never from a stale local copy). `[]` disables CI owedness — deliberately. |
 | `test_owed` | Optional: if the diff hits `paths`, the green run of `workflow_path` must have executed ≥1 successful job whose name contains `job_name_contains`. This is the "skipped ≠ passed" gate. |
 | `deploy.model` | `"actions"`: a deploy workflow with a shared concurrency group — enables the pending-slot queue check. `"external"`: an auto-deploy-on-push provider — enables the main-tip-green check and optional `status_command` probe (exit 0 = idle/healthy). `"none"`: no deploy gating. |
+| `verdict_paths` | Glob prefixes (e.g. `[".github/workflows/**", "src/**"]`) that `check_pr_board_freshness.py` treats as verdict-changing if they land on the base branch after a PR's board concluded. Defaults to `["**"]` (any file counts) if omitted. |
 
 ## Verdicts
 
@@ -85,8 +88,8 @@ or ending in `-PENDING`/`-UNKNOWN` are **retryable** (transient state — the br
 polls up to 10 minutes); all others are **terminal** for that request:
 `BAD-REQUEST`, `PR-NOT-OPEN`, `BASE-NOT-DEFAULT`, `HEAD-MOVED`, `CONFLICT`,
 `NO-APPROVAL`, `STALE-APPROVAL`, `CHANGES-REQUESTED`, `EVIDENCE-GATE`, `CI-NOT-RUN`,
-`CI-EMPTY`, `CI-RED`, `CI-UNTESTED`, `MAIN-CI-RED`, `CHECK-ERROR`, and the broker's
-own `GUARD-DENIED`, `MERGE-FAILED`, `MERGE-UNCONFIRMED`.
+`CI-EMPTY`, `CI-RED`, `CI-UNTESTED`, `MAIN-CI-RED`, `CHECK-ERROR`, `STALE-BOARD`,
+and the broker's own `GUARD-DENIED`, `MERGE-FAILED`, `MERGE-UNCONFIRMED`.
 
 ## Safety design
 
