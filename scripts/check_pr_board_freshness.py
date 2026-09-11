@@ -233,6 +233,21 @@ def main():
               f"({age_minutes:.0f}m ago){skip_note}")
         return 0
 
+    # A file's own path can make it inert regardless of which commit or tag carried it --
+    # a rollback anchor arriving inside an ordinary feature merge (not just a dedicated
+    # [skip ci] deploy-automation commit) is still a generated artifact no workflow reads as
+    # an input. Path-level inertness is independent of the [skip ci] intersection above: that
+    # one exempts a COMMIT only when [skip ci] AND all its files are generated; this exempts
+    # a FILE outright when its path is generated, however it arrived (found 2026-09-11 by a
+    # peer session's independent checker disagreeing by exactly the files that arrived via a
+    # normal commit rather than a tagged one -- over-flagging is the safe direction but erodes
+    # trust in the signal, the same reason the earlier [skip ci] narrowing mattered).
+    changed = [f for f in changed if not matches_any(f, GENERATED_SKIP_CI_PATHS)]
+    if not changed:
+        print(f"FRESH: origin/{base_branch} unchanged (net of generated paths) since board "
+              f"concluded ({age_minutes:.0f}m ago){skip_note}")
+        return 0
+
     verdict_changing = [f for f in changed if matches_any(f, verdict_paths)]
     if not verdict_changing:
         print(f"FRESH: {len(changed)} file(s) landed on origin/{base_branch} since the "
