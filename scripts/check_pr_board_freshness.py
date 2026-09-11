@@ -14,8 +14,8 @@ merging" -- use that where your plan/host supports it. This is the fallback
 for repos where that setting is unavailable (e.g. GitHub Free on a private
 repo), and it depends on being run; it is not a gate GitHub itself enforces.
 
-Requirements: Python 3.9+, git (run from inside the repo), GitHub CLI (`gh`)
-authenticated for the target repo if --head-run-time is not supplied directly.
+Requirements: Python 3.9+, GitHub CLI (`gh`) authenticated for the target
+repo. Pure `gh api` -- no local git clone required, run from anywhere.
 
 Usage:
   python check_pr_board_freshness.py --repo owner/name --pr 123
@@ -120,14 +120,41 @@ def main():
               f"threshold -- not checked")
         return 0
 
-    # Files that landed on base_branch's tip strictly after the board's own CI concluded.
-    r = run(["git", "log", f"--since={board_time.isoformat()}",
-             "--name-only", "--pretty=format:", f"origin/{base_branch}"])
-    if r.returncode != 0:
-        print(f"UNKNOWN: git log against origin/{base_branch} failed: {r.stderr.strip()}")
+    # Commits landed on base_branch's tip strictly after the board's own CI concluded,
+    # via the GitHub API only -- no local clone assumed or required.
+    since_iso = board_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    commits, err = gh_json(["api", f"repos/{args.repo}/commits",
+                             "-f", f"sha={base_branch}", "-f", f"since={since_iso}",
+                             "-f", "per_page=100", "--paginate"])
+    if err or commits is None:
+        print(f"UNKNOWN: listing commits on {base_branch} since board concluded failed: {err}")
         return 2
 
-    changed = sorted({line.strip() for line in r.stdout.splitlines() if line.strip()})
+    changed = set()
+    for c in commits:
+        sha = c.get("sha")
+        if not sha:
+            continue
+        detail, err = gh_json(["api", f"repos/{args.repo}/commits/{sha}",
+                                "-f", "per_page=300"])
+        if err or detail is None:
+            print(f"UNKNOWN: could not read commit {sha[:12]} on {base_branch}: {err}")
+            return 2
+        if "files" not in detail:
+            print(f"UNKNOWN: commit {sha[:12]} on {base_branch} has no 'files' field in the "
+                  f"API response (large-commit truncation or API change) -- cannot determine "
+                  f"what changed, refusing to guess")
+            return 2
+        for f in detail["files"] or []:
+            fn = f.get("filename")
+            if fn:
+                changed.add(fn)
+            # a rename carries the old path too -- either side landing counts
+            prev = f.get("previous_filename")
+            if prev:
+                changed.add(prev)
+
+    changed = sorted(changed)
     if not changed:
         print(f"FRESH: origin/{base_branch} unchanged since board concluded "
               f"({age_minutes:.0f}m ago)")
