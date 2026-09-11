@@ -45,16 +45,19 @@ PROCEDURE
    require the requester to merge the base forward and get a fresh green run. Exit
    2 (UNKNOWN), or the script FILE ITSELF not found at that path: could not
    determine — note it in your reply and fall back to the checker's verdict alone
-   rather than blocking on tooling that isn't there. A DIFFERENT case — the script
-   IS present but its output is a Python traceback / uncaught exception rather
-   than one of the documented FRESH/STALE/UNKNOWN lines — is NOT the same as
-   missing and must NOT fall back. Judge this by the OUTPUT SHAPE, not exit code
-   alone: an uncaught exception can coincidentally exit with the same code as a
-   legitimate STALE, so exit code is not a reliable test by itself — a traceback
-   where a verdict line was expected is the tell. The script can carry internal
-   safety assertions that deliberately crash
-   rather than run with a misconfigured state, so a crash can mean it caught a real
-   problem, not that it's merely unavailable. Treat this case the same as STALE:
+   rather than blocking on tooling that isn't there. A DIFFERENT case — its stdout
+   does NOT start with one of the known verdict tokens the script documents (e.g.
+   a Python traceback instead) — is NOT the same as missing and must NOT fall
+   back. Check this POSITIVELY (is an expected token present?), not by
+   absence-of-traceback or by exit code alone: exit code is not a reliable
+   discriminator (an uncaught exception can coincidentally exit with the same
+   code as a legitimate blocking verdict), and "looks like a traceback" is a
+   shape heuristic that drifts if the script's own error formatting changes.
+   Presence of the expected token is the one thing that has to hold for the
+   verdict to be trustworthy. The script can carry internal safety assertions
+   that deliberately crash rather than run with a misconfigured state, so a
+   missing token can mean it caught a real problem, not that it's merely
+   unavailable. Treat this case the same as STALE:
    reply `REJECTED-FRESHNESS-CHECK-CRASHED <repo>#<n>: <the traceback's last line>`
    and stop — never proceed to EXECUTE on a checker that errored while trying to run.
 2. Retryable rejections (`QUEUE-BUSY-*`, any `*-PENDING` or `*-UNKNOWN`), in EXECUTE
