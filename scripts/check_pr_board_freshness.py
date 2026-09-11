@@ -28,9 +28,14 @@ Config (JSON; all keys optional):
                        is "verdict-changing". Defaults to ["**"] (any file
                        counts) if omitted -- the conservative default.
 
-Exit codes:
+Exit codes (stdout always starts with one of the four tokens below; a caller
+should check for the token positively -- its absence, e.g. an uncaught
+exception, means the check did not run and must not be treated as a pass):
   0  FRESH        -- board's base is unchanged, or only inert files landed
                       since (no verdict_paths match) -- READY is trustworthy
+  0  MERGED       -- the PR is already merged. A statement of state, not a
+                      freshness verdict -- says nothing about whether the
+                      merge itself happened on a fresh board.
   1  STALE        -- verdict-changing files landed in the base since the
                       board's CI run concluded -- do not trust READY as-is
   2  UNKNOWN       -- could not determine (missing gh/git, no CI run found,
@@ -142,10 +147,23 @@ def main():
             return 2
 
     pr, err = gh_json(["pr", "view", str(args.pr), "-R", args.repo,
-                        "--json", "headRefOid,baseRefName,statusCheckRollup"])
+                        "--json", "headRefOid,baseRefName,statusCheckRollup,state,mergeCommit"])
     if err or pr is None:
         print(f"UNKNOWN: could not read PR #{args.pr}: {err}")
         return 2
+
+    # Once a PR merges, its own commit sits inside the "gap" between its recorded head and
+    # main's tip -- so an unguarded run flags a merged PR as stale against ITS OWN files, an
+    # impossible condition that trains readers to discount the tool (found 2026-09-11 by a
+    # peer session hitting this exact shape re-checking a PR seconds after it merged, which
+    # is precisely when this coordinator's own dispatch pattern re-verifies). MERGED is a
+    # distinct verdict, not a judgement the merge was sound -- a PR can merge on a stale
+    # board (this fleet watched it happen) and this check says nothing about that.
+    if pr.get("state") == "MERGED":
+        print(f"MERGED: PR #{args.pr} already merged"
+              + (f" at {pr['mergeCommit']['oid'][:12]}" if pr.get("mergeCommit") else "")
+              + " -- this is a statement of state, not a freshness verdict; nothing to check")
+        return 0
 
     head = pr["headRefOid"]
     base_branch = pr.get("baseRefName") or default_branch
