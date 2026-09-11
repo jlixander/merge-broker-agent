@@ -43,6 +43,7 @@ import fnmatch
 import json
 import subprocess
 import sys
+import urllib.parse
 from datetime import datetime, timezone
 
 
@@ -122,10 +123,16 @@ def main():
 
     # Commits landed on base_branch's tip strictly after the board's own CI concluded,
     # via the GitHub API only -- no local clone assumed or required.
+    #
+    # Deliberately a single URL-encoded query string, not `-f key=value` pairs: on
+    # Windows/Git-Bash, `gh api -f since=2026-09-10T22:00:00Z` silently 404s because the
+    # colons in the ISO timestamp get mangled on the way to the argument -- the same MSYS
+    # path/arg-rewriting class of bug this codebase's own doctrine already warns about
+    # for `aws` and `git show <ref>:<path>`. A raw query string sidesteps it entirely.
     since_iso = board_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-    commits, err = gh_json(["api", f"repos/{args.repo}/commits",
-                             "-f", f"sha={base_branch}", "-f", f"since={since_iso}",
-                             "-f", "per_page=100", "--paginate"])
+    commits_url = (f"repos/{args.repo}/commits?sha={urllib.parse.quote(base_branch)}"
+                   f"&since={urllib.parse.quote(since_iso)}&per_page=100")
+    commits, err = gh_json(["api", commits_url, "--paginate"])
     if err or commits is None:
         print(f"UNKNOWN: listing commits on {base_branch} since board concluded failed: {err}")
         return 2
@@ -135,8 +142,7 @@ def main():
         sha = c.get("sha")
         if not sha:
             continue
-        detail, err = gh_json(["api", f"repos/{args.repo}/commits/{sha}",
-                                "-f", "per_page=300"])
+        detail, err = gh_json(["api", f"repos/{args.repo}/commits/{sha}?per_page=300"])
         if err or detail is None:
             print(f"UNKNOWN: could not read commit {sha[:12]} on {base_branch}: {err}")
             return 2
