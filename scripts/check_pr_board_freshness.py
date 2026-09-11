@@ -110,17 +110,28 @@ def main():
 
     runs, err = gh_json(["run", "list", "-R", args.repo, "--commit", head,
                           "--limit", "20",
-                          "--json", "databaseId,status,conclusion,updatedAt,workflowName"])
+                          "--json", "databaseId,status,conclusion,createdAt,updatedAt,workflowName"])
     if err or not runs:
         print(f"UNKNOWN: no CI runs found for head {head[:12]}: {err or 'empty'}")
         return 2
 
-    concluded = [r for r in runs if r.get("status") == "completed" and r.get("updatedAt")]
+    concluded = [r for r in runs if r.get("status") == "completed" and r.get("createdAt")]
     if not concluded:
         print(f"UNKNOWN: no concluded CI run at head {head[:12]} yet")
         return 2
 
-    board_time = max(parse_iso(r["updatedAt"]) for r in concluded)
+    # A pull_request run's merge ref (what its CI actually tests against) is computed at
+    # CREATION time, not completion time. A run queued for 90 minutes before it starts still
+    # tested against main as it stood 90 minutes ago -- commits that landed on main during the
+    # queue wait are invisible to it, yet `updatedAt` (completion) makes the board look far
+    # fresher than the base it evaluated. Using createdAt closes that gap; min() across
+    # concluded runs is the conservative (earliest, widest) choice when jobs were created at
+    # slightly different times. (Found 2026-09-11 by a peer session watching PR #1798: its board
+    # was reported FRESH 3 minutes after Lambda Tests finished, when the actual base the run
+    # tested against was 90 minutes stale and two intervening merges had landed workflow/shared
+    # files in that window -- exactly the gap this checker exists to catch, missed because it
+    # was measuring the wrong end of the run.)
+    board_time = min(parse_iso(r["createdAt"]) for r in concluded)
     now = datetime.now(timezone.utc)
     age_minutes = (now - board_time).total_seconds() / 60
 
