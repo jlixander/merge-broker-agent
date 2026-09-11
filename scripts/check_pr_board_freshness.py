@@ -138,6 +138,7 @@ def main():
         return 2
 
     changed = set()
+    skip_ci_commits = 0
     for c in commits:
         sha = c.get("sha")
         if not sha:
@@ -151,6 +152,18 @@ def main():
                   f"API response (large-commit truncation or API change) -- cannot determine "
                   f"what changed, refusing to guess")
             return 2
+        # A commit tagged [skip ci] triggered no workflow anywhere -- it cannot have changed
+        # any verdict regardless of which files it touches. Deploy automation in this fleet
+        # auto-commits rollback anchors this way after every successful deploy (e.g.
+        # "chore(rollback): anchor <fn> v<N> [skip ci]"), which would otherwise make every
+        # board look stale forever, permanently, on the least informative commits possible
+        # (PBC-STALE-GREEN-MERGE false-positive found 2026-09-11 via PR #1761/#1788). This
+        # is a commit-level exemption, not a path exemption: [skip ci] is a stronger and more
+        # general signal than any verdict_paths guess about the files it happens to touch.
+        msg = ((detail.get("commit") or {}).get("message") or "")
+        if "[skip ci]" in msg.lower():
+            skip_ci_commits += 1
+            continue
         for f in detail["files"] or []:
             fn = f.get("filename")
             if fn:
@@ -160,23 +173,24 @@ def main():
             if prev:
                 changed.add(prev)
 
+    skip_note = f" ({skip_ci_commits} [skip ci] commit(s) excluded)" if skip_ci_commits else ""
     changed = sorted(changed)
     if not changed:
         print(f"FRESH: origin/{base_branch} unchanged since board concluded "
-              f"({age_minutes:.0f}m ago)")
+              f"({age_minutes:.0f}m ago){skip_note}")
         return 0
 
     verdict_changing = [f for f in changed if matches_any(f, verdict_paths)]
     if not verdict_changing:
         print(f"FRESH: {len(changed)} file(s) landed on origin/{base_branch} since the "
               f"board concluded ({age_minutes:.0f}m ago), none under verdict_paths "
-              f"{verdict_paths} -- gap is inert")
+              f"{verdict_paths} -- gap is inert{skip_note}")
         return 0
 
     print(f"STALE: board for head {head[:12]} concluded {age_minutes:.0f}m ago; "
           f"origin/{base_branch} has since gained {len(verdict_changing)} verdict-changing "
           f"file(s) (of {len(changed)} total): {', '.join(verdict_changing[:10])}"
-          + (" ..." if len(verdict_changing) > 10 else ""))
+          + (" ..." if len(verdict_changing) > 10 else "") + skip_note)
     return 1
 
 
