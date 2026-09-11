@@ -99,6 +99,24 @@ def main():
     default_branch = cfg.get("default_branch", "main")
     verdict_paths = cfg.get("verdict_paths", ["**"])
 
+    # "Generated" does not imply "inert" -- a generated file can still be verdict-bearing (e.g.
+    # repo_iam_snapshot.json, which repo-iam-snapshot-drift compares against iam/roles/** and
+    # tests-gate reads the result of). GENERATED_SKIP_CI_PATHS now stands alone (see above), so
+    # a mistaken entry there is enough by itself to silently exempt a real file. Only meaningful
+    # to check against a NARROWED config -- the "**" default makes every path nominally
+    # overlap trivially and isn't the hazard this guards against. Fails at the moment of a bad
+    # config edit rather than silently at some merge weeks later (flagged 2026-09-11 by a peer
+    # session as the consequence of the standalone-path change they themselves proposed).
+    if args.config and verdict_paths != ["**"]:
+        overlap = [g for g in GENERATED_SKIP_CI_PATHS
+                   if any(matches_any(g.rstrip("*"), [vp]) or matches_any(vp.rstrip("*"), [g])
+                          for vp in verdict_paths)]
+        if overlap:
+            print(f"UNKNOWN: config error -- GENERATED_SKIP_CI_PATHS entries {overlap} overlap "
+                  f"verdict_paths {verdict_paths}; a generated-path exemption must never also be "
+                  f"a verdict-relevant path, refusing to run with an inconsistent config")
+            return 2
+
     pr, err = gh_json(["pr", "view", str(args.pr), "-R", args.repo,
                         "--json", "headRefOid,baseRefName,statusCheckRollup"])
     if err or pr is None:
