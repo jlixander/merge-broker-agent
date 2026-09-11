@@ -65,6 +65,14 @@ def parse_iso(ts):
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
 
+# Paths known to hold ONLY generated, non-source content that no workflow reads as an
+# input -- the intersection partner for the [skip ci] commit exemption below. Keep this
+# narrow: it is the allowlist that makes a [skip ci] tag trustworthy, not a general
+# "probably fine" list. Deploy automation's "chore(rollback): anchor ... [skip ci]"
+# commits are the only source observed so far (376/376 in a 2026-09-11 spot check).
+GENERATED_SKIP_CI_PATHS = ("rollbacks/**",)
+
+
 def matches_any(path, patterns):
     return any(fnmatch.fnmatch(path, pat) for pat in patterns)
 
@@ -152,19 +160,41 @@ def main():
                   f"API response (large-commit truncation or API change) -- cannot determine "
                   f"what changed, refusing to guess")
             return 2
-        # A commit tagged [skip ci] triggered no workflow anywhere -- it cannot have changed
-        # any verdict regardless of which files it touches. Deploy automation in this fleet
-        # auto-commits rollback anchors this way after every successful deploy (e.g.
-        # "chore(rollback): anchor <fn> v<N> [skip ci]"), which would otherwise make every
-        # board look stale forever, permanently, on the least informative commits possible
-        # (PBC-STALE-GREEN-MERGE false-positive found 2026-09-11 via PR #1761/#1788). This
-        # is a commit-level exemption, not a path exemption: [skip ci] is a stronger and more
-        # general signal than any verdict_paths guess about the files it happens to touch.
+        # GitHub's per-commit files list silently caps at 300 with no truncation flag in the
+        # response. A commit at exactly that cap might have 300 real files or 3000 -- we
+        # cannot tell from here, and treating the visible 300 as the whole list (for either
+        # the [skip ci] exemption or the general changed-file count) would silently undercount
+        # in the unsafe direction (found 2026-09-11 by a peer session's independent port).
+        if len(detail["files"] or []) == 300:
+            print(f"UNKNOWN: commit {sha[:12]} on {base_branch} has exactly 300 files listed "
+                  f"-- GitHub's per-commit API caps there with no truncation indicator, so this "
+                  f"may be an undercount; refusing to guess what changed")
+            return 2
+        # A commit tagged [skip ci] triggered no workflow when it landed -- but that says
+        # nothing about whether its CONTENT can change a verdict for the NEXT commit's CI,
+        # which runs against a base that now includes it. [skip ci] alone is therefore an
+        # unsound exemption: a source change that happens to carry that tag (a docs fix that
+        # also touches a script, an un-CI'd hotfix) would silently read as inert -- the unsafe
+        # direction, since it makes a stale board look FRESH. Correctness requires ALSO
+        # narrowing to paths already known to be generated/inert -- intersect the two
+        # conditions rather than trusting [skip ci] alone (caught 2026-09-11 by a peer
+        # session's review before this shipped past a single-repo blast radius; deploy
+        # automation in this fleet auto-commits rollback anchors this way after every
+        # successful deploy, e.g. "chore(rollback): anchor <fn> v<N> [skip ci]", which is the
+        # only source of [skip ci] commits observed so far -- 377/377 in a spot check -- but
+        # the exemption must fail closed on the day that stops being true, not silently widen).
         msg = ((detail.get("commit") or {}).get("message") or "")
-        if "[skip ci]" in msg.lower():
+        files_this_commit = detail["files"] or []
+        is_skip_ci = "[skip ci]" in msg.lower()
+        all_inert = files_this_commit and all(
+            matches_any(f.get("filename") or "", GENERATED_SKIP_CI_PATHS)
+            and not f.get("previous_filename")  # a rename out of a generated dir still counts
+            for f in files_this_commit
+        )
+        if is_skip_ci and all_inert:
             skip_ci_commits += 1
             continue
-        for f in detail["files"] or []:
+        for f in files_this_commit:
             fn = f.get("filename")
             if fn:
                 changed.add(fn)
