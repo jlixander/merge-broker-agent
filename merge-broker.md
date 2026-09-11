@@ -46,9 +46,13 @@ PROCEDURE
    2 (UNKNOWN), or the script FILE ITSELF not found at that path: could not
    determine — note it in your reply and fall back to the checker's verdict alone
    rather than blocking on tooling that isn't there. A DIFFERENT case — the script
-   IS present but exits abnormally while running (uncaught exception, traceback,
-   any exit code other than 0/1/2) — is NOT the same as missing and must NOT fall
-   back: the script can carry internal safety assertions that deliberately crash
+   IS present but its output is a Python traceback / uncaught exception rather
+   than one of the documented FRESH/STALE/UNKNOWN lines — is NOT the same as
+   missing and must NOT fall back. Judge this by the OUTPUT SHAPE, not exit code
+   alone: an uncaught exception can coincidentally exit with the same code as a
+   legitimate STALE, so exit code is not a reliable test by itself — a traceback
+   where a verdict line was expected is the tell. The script can carry internal
+   safety assertions that deliberately crash
    rather than run with a misconfigured state, so a crash can mean it caught a real
    problem, not that it's merely unavailable. Treat this case the same as STALE:
    reply `REJECTED-FRESHNESS-CHECK-CRASHED <repo>#<n>: <the traceback's last line>`
