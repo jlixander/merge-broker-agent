@@ -72,9 +72,33 @@ def parse_iso(ts):
 # commits are the only source observed so far (376/376 in a 2026-09-11 spot check).
 GENERATED_SKIP_CI_PATHS = ("rollbacks/**",)
 
+# Fixed, narrow-by-construction anchor for the non-overlap guard below. This fleet's real
+# invocations of this script never pass --config (verdict_paths defaults to "**"), so a
+# guard that only checks against verdict_paths never fires in the configuration actually
+# used -- a dead guard, caught live 2026-09-11 by a peer session asking "does this guard
+# ever run in the dispatch path you actually use?" it didn't. This list is deliberately
+# concrete and non-"**" so the assertion below is always meaningful, not conditional on
+# --config. Mirrors the paths repeatedly found verdict-relevant tonight (workflow files,
+# lambda source, IAM, generated-but-verdict-bearing registry/snapshot docs).
+RISKY_PREFIXES = (".github/workflows/**", "lambdas/**", "iam/**",
+                   "docs/surface-registry/**", "scripts/**")
+
 
 def matches_any(path, patterns):
     return any(fnmatch.fnmatch(path, pat) for pat in patterns)
+
+
+# Runs unconditionally at import time, independent of --config -- this is the guard that
+# actually fires in this fleet's real invocations, unlike the verdict_paths-anchored one in
+# main() which is a no-op under the "**" default every real dispatch here uses. AssertionError
+# here means someone widened GENERATED_SKIP_CI_PATHS to cover a path this fleet has already
+# found to be verdict-relevant; fail the import, not just a runtime branch nobody takes.
+for _g in GENERATED_SKIP_CI_PATHS:
+    assert not any(fnmatch.fnmatch(_g.rstrip("*"), rp) or fnmatch.fnmatch(rp.rstrip("*"), _g)
+                   for rp in RISKY_PREFIXES), (
+        f"GENERATED_SKIP_CI_PATHS entry {_g!r} overlaps a RISKY_PREFIXES entry -- "
+        f"a generated-path exemption must never also be a verdict-relevant path")
+del _g
 
 
 def main():
