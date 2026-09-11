@@ -115,10 +115,22 @@ def main():
         print(f"UNKNOWN: no CI runs found for head {head[:12]}: {err or 'empty'}")
         return 2
 
-    concluded = [r for r in runs if r.get("status") == "completed" and r.get("createdAt")]
-    if not concluded:
+    completed_runs = [r for r in runs if r.get("status") == "completed"]
+    if not completed_runs:
         print(f"UNKNOWN: no concluded CI run at head {head[:12]} yet")
         return 2
+    # A completed run missing createdAt must not be silently dropped from consideration --
+    # excluding it can only ever push the computed min() later (more permissive), which is
+    # the unsafe direction, exactly the failure this checker exists to prevent elsewhere.
+    # Unknown data must read as unknown, never as "this run doesn't count."
+    missing_created = [r for r in completed_runs if not r.get("createdAt")]
+    if missing_created:
+        names = ", ".join(r.get("workflowName", "?") for r in missing_created)
+        print(f"UNKNOWN: {len(missing_created)} concluded run(s) at head {head[:12]} missing "
+              f"createdAt in the API response ({names}) -- cannot establish the board's true "
+              f"age without it, refusing to guess")
+        return 2
+    concluded = completed_runs
 
     # A pull_request run's merge ref (what its CI actually tests against) is computed at
     # CREATION time, not completion time. A run queued for 90 minutes before it starts still
